@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TM.7 Visa Extension — Rayong / Chiang Saen",
+  title: "TM.7 Visa Extension Form Generator",
   description: "Fill in your details and instantly generate a printable TM.7 visa extension form (with STM.2, STM.9, and STM.11).",
 };
 

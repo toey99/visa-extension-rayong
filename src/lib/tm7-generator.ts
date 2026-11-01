@@ -1,20 +1,26 @@
 // =============================================================
 // TM.7 Master PDF Generator
 // =============================================================
-// Loads the 5-page master template (tm7-master.pdf) and overlays
-// applicant data onto the form fields.
+// Loads the 3-page template (public/templates/tm7-rayong.pdf) and
+// overlays applicant data onto the form fields.
 //
 // Pages:
 //   1-2: TM.7 form (personal details, address)
-//   3:   STM.2
-//   4:   STM.9 / Overstay
-//   5:   STM.11
+//   3:   STM.2 (English-only edition) — coordinates in tm7-page3-fields.ts
 // =============================================================
 
 import { PDFDocument, PDFPage, rgb } from "pdf-lib";
 import fs from "fs";
 import path from "path";
 import { passportDateFields } from "./tm7-passport-dates.ts";
+import { officeFormLocation, type OfficeId } from "./offices.ts";
+import { uppercaseTm7Data } from "./tm7-normalize.ts";
+import {
+  PAGE3_INDEX,
+  PAGE3_LINE_THICKNESS,
+  PAGE3_TITLE_STRIKES,
+  page3TextOps,
+} from "./tm7-page3-fields.ts";
 
 export type Title = "MR." | "MRS." | "MISS";
 
@@ -51,7 +57,7 @@ export type Tm7FormData = {
 
   // Extension
   appointmentDate?: string;      // ISO — used as form date
-  formLocation?: string;         // e.g. RAYONG / CHIANG SAEN — see src/lib/offices.ts
+  office: OfficeId;              // RAYONG | CHIANG_SAEN — printed location comes from offices.ts
   extensionDays?: number;        // default 30
   extensionReason?: string;      // default TOURISM
 };
@@ -90,19 +96,20 @@ const FEMALE_OFFSETS: Readonly<Record<string, Offset>> = Object.freeze({
   // female line is 15 units wide (x 137.5→152.5); dw:15 lengthens it
   // to 30 by pushing the left endpoint out to x 122.5.
   "p1.titleLine": { dx: 12, dy: 0, dw: 15 },
-  // Page 3 title line: shift left by 16 units.
-  "p3.titleLine": { dx: -16, dy: 0 },
-  // Page 4 title line: shift left by 16 units.
-  "p4.titleLine": { dx: -16, dy: 0 },
 });
 
 let cachedTemplate: Uint8Array | null = null;
 let cachedTemplateMtimeMs = 0;
 let cachedFont: Uint8Array | null = null;
 
+const TEMPLATE_PATH = path.join(process.cwd(), "public", "templates", "tm7-rayong.pdf");
+const TEMPLATE_PAGES = 3;
+
 async function loadTemplate(): Promise<Uint8Array> {
-  const p = path.join(process.cwd(), "public", "templates", "rayong", "tm7-master.pdf");
-  // Cache-bust on the file's mtime: re-read whenever tm7-master.pdf changes
+  const p = TEMPLATE_PATH;
+  // No fallback template: a missing file must fail loudly.
+  if (!fs.existsSync(p)) throw new Error(`TM7 template not found: ${p}`);
+  // Cache-bust on the file's mtime: re-read whenever the template changes
   // on disk so an updated template is picked up without restarting the server.
   const mtimeMs = fs.statSync(p).mtimeMs;
   if (cachedTemplate && mtimeMs === cachedTemplateMtimeMs) return cachedTemplate;
@@ -148,11 +155,20 @@ function calcAge(dob: Date | null): string {
 }
 
 export async function generateTm7Pdf(
-  data: Tm7FormData,
+  input: Tm7FormData,
   tm30Pdf?: Uint8Array,
 ): Promise<Uint8Array> {
+  // Safety net: every free-text field is uppercased before drawing.
+  const data = uppercaseTm7Data(input);
   const templateBytes = await loadTemplate();
   const pdfDoc = await PDFDocument.load(templateBytes);
+  const templatePages = pdfDoc.getPageCount();
+  console.log(`[TM7] template=${TEMPLATE_PATH} pages=${templatePages}`);
+  if (templatePages !== TEMPLATE_PAGES) {
+    throw new Error(
+      `TM7 template ${TEMPLATE_PATH} has ${templatePages} pages; expected ${TEMPLATE_PAGES} (wrong file copied?)`,
+    );
+  }
 
   const fontkit = (await import("@pdf-lib/fontkit")).default;
   pdfDoc.registerFontkit(fontkit);
@@ -161,7 +177,8 @@ export async function generateTm7Pdf(
   const font = await pdfDoc.embedFont(fontBytes);
 
   const pages = pdfDoc.getPages();
-  const [page1, page2, page3, page4, page5] = pages;
+  const [page1, page2] = pages;
+  const page3 = pages[PAGE3_INDEX];
 
   const S = 11;
   const C = rgb(0.1, 0.2, 0.8); // ballpoint blue
@@ -174,7 +191,7 @@ export async function generateTm7Pdf(
   const applicantTitle = data.title;
   const titledName = `${applicantTitle} ${lastName} ${firstName}`.replace(/\s+/g, " ").trim();
 
-  const formLocation = (data.formLocation || "RAYONG").toUpperCase();
+  const formLocation = officeFormLocation(data.office);
   const extensionDays = (data.extensionDays ?? 30).toString();
   const extensionReason = (data.extensionReason || "TOURISM").toUpperCase();
   const portOfArrival = (data.portOfArrival || "").toUpperCase();
@@ -213,7 +230,6 @@ export async function generateTm7Pdf(
   const district = (data.district || "").trim();
   const province = (data.province || "").trim();
   const postalCode = (data.postalCode || "").trim();
-  const phone = (data.phone || "").trim();
   const provinceZip = postalCode ? `${province} ${postalCode}` : province;
   const fullAddress = `${houseNo} ${road}, ${subDistrict}, ${district}, ${provinceZip}`;
   const lineThickness = 1.5;
@@ -333,93 +349,35 @@ export async function generateTm7Pdf(
   drawFieldText(page2, "p2.subDistrict", subDistrict, { x: 440, y: addressLine1Y, size: 12, font, color: C });
   drawFieldText(page2, "p2.district", district, { x: 150, y: addressLine2Y, size: 12, font, color: C });
   drawFieldText(page2, "p2.provinceZip", provinceZip, { x: 365, y: addressLine2Y, size: 12, font, color: C });
-  if (phone) {
-    drawFieldText(page2, "p2.phone", phone, { x: 150, y: addressLine2Y - 40, size: 12, font, color: C });
-  }
+  // Phone is intentionally NOT printed on page 2 (it stays in the form
+  // and in Tm7FormData for other uses).
   drawFieldText(page2, "p2.fullAddress", fullAddress, { x: 175, y: fullAddressY, size: 8, font, color: C });
 
-  // ── Page 3: STM.2 ──────────────────────────────────────────
-  // LOCKED — coordinates finalized and verified; do not change.
-  drawFieldText(page3, "p3.lastName", lastName, { x: 170, y: 380, size: S, font, color: C });
-  drawFieldText(page3, "p3.firstName", firstName, { x: 220, y: 380, size: S, font, color: C });
-  drawFieldText(page3, "p3.printDate", printDate, { x: 450, y: 420, size: S, font, color: C });
-  drawFieldText(page3, "p3.nationality", nationality, { x: 450, y: 380, size: 12, font, color: C });
-  drawFieldText(page3, "p3.age", calculatedAge, { x: 320, y: 380, size: 12, font, color: C });
-  drawFieldText(page3, "p3.extensionReason", extensionReason, { x: 450, y: 365, size: 12, font, color: C });
-
-  const p3LineY = 380;
-  if (applicantTitle === "MR.") {
-    drawFieldLine(page3, "p3.titleLine", { start: { x: 115, y: p3LineY }, end: { x: 158, y: p3LineY }, thickness: lineThickness, color: C });
-  } else {
-    drawFieldLine(page3, "p3.titleLine", { start: { x: 115, y: p3LineY }, end: { x: 145, y: p3LineY }, thickness: lineThickness, color: C });
+  // ── Page 3: STM.2 (English-only edition) ───────────────────
+  // All coordinates live in PAGE3_FIELDS / PAGE3_TITLE_STRIKES
+  // (src/lib/tm7-page3-fields.ts) so each fix is a one-number change.
+  for (const op of page3TextOps({
+    printDate,
+    lastName,
+    firstName,
+    age: calculatedAge,
+    nationality,
+    extensionReason,
+  })) {
+    page3.drawText(op.value, { x: op.x, y: op.y, size: op.size, font, color: C });
   }
-
-  // ── Page 4: STM.9 / Overstay ──────────────────────────────
-  // LOCKED — coordinates finalized and verified; do not change.
-  drawFieldText(page4, "p4.lastName", lastName, { x: 250, y: 590, size: S, font, color: C });
-  drawFieldText(page4, "p4.firstName", firstName, { x: 400, y: 590, size: S, font, color: C });
-  drawFieldText(page4, "p4.formDay", formDate.day, { x: 380, y: 633, size: 12, font, color: C });
-  drawFieldText(page4, "p4.formMonth", formDate.month, { x: 440, y: 633, size: 12, font, color: C });
-  drawFieldText(page4, "p4.formYear", formDate.year, { x: 525, y: 633, size: 12, font, color: C });
-  drawFieldText(page4, "p4.formLocation", formLocation, { x: 400, y: 675, size: 12, font, color: C });
-  drawFieldText(page4, "p4.dash", "-", { x: 300, y: 650, size: 12, font, color: C });
-  drawFieldText(page4, "p4.age", calculatedAge, { x: 180, y: 550, size: 12, font, color: C });
-  drawFieldText(page4, "p4.nationality", nationality, { x: 280, y: 550, size: 12, font, color: C });
-  drawFieldText(page4, "p4.passportNo", passportNo, { x: 450, y: 550, size: 12, font, color: C });
-
-  const p4LineY = 570;
-  if (applicantTitle === "MR.") {
-    drawFieldLine(page4, "p4.titleLine", { start: { x: 125, y: p4LineY }, end: { x: 160, y: p4LineY }, thickness: lineThickness, color: C });
-  } else {
-    drawFieldLine(page4, "p4.titleLine", { start: { x: 125, y: p4LineY }, end: { x: 154, y: p4LineY }, thickness: lineThickness, color: C });
+  for (const s of PAGE3_TITLE_STRIKES[applicantTitle]) {
+    page3.drawLine({
+      start: { x: s.x1, y: s.y },
+      end: { x: s.x2, y: s.y },
+      thickness: PAGE3_LINE_THICKNESS,
+      color: C,
+    });
   }
-
-  // ── Page 5: STM.11 ────────────────────────────────────────
-  // Last name (นามสกุล) and first name (ชื่อ) share the name baseline
-  // p5NameY; first name is now placed at an explicit X (was computed
-  // from the last-name width).
-  const p5NameY = 380;
-  const p5LastNameX = 220;
-  drawFieldText(page5, "p5.lastName", lastName, { x: p5LastNameX, y: p5NameY, size: S, font, color: C });
-  drawFieldText(page5, "p5.firstName", firstName, { x: 300, y: p5NameY, size: S, font, color: C });
-  // Date (วันที่).
-  drawFieldText(page5, "p5.printDate", printDate, { x: 450, y: 415, size: S, font, color: C });
-
-  // Title line (เส้น): left endpoint anchored at x:150, y:380; each
-  // branch keeps its own length (MR. 50, female 30).
-  const p5LineY = 380;
-  if (applicantTitle === "MR.") {
-    drawFieldLine(page5, "p5.titleLine", { start: { x: 150, y: p5LineY }, end: { x: 200, y: p5LineY }, thickness: lineThickness, color: C });
-  } else {
-    drawFieldLine(page5, "p5.titleLine", { start: { x: 150, y: p5LineY }, end: { x: 180, y: p5LineY }, thickness: lineThickness, color: C });
-  }
-
-  // Age (อายุ): shares the name baseline (p5NameY).
-  drawFieldText(page5, "p5.age", calculatedAge, { x: 475, y: p5NameY, size: 12, font, color: C });
-  // Race/Ethnicity (เชื้อชาติ) & Passport No. share this baseline.
-  const p5RaceY = 363;
-  drawFieldText(page5, "p5.nationality", nationality, { x: 125, y: p5RaceY, size: 12, font, color: C });
-  // Passport No. (เลขที่พาสปอร์ต): keep X, Y aligned to Race/Ethnicity baseline.
-  drawFieldText(page5, "p5.passportNo", passportNo, { x: 300, y: p5RaceY, size: 12, font, color: C });
-
-  const p5Address = [houseNo, road, subDistrict, district, provinceZip]
-    .filter(Boolean)
-    .join(", ");
-  const p5AddressFull = phone ? `${p5Address}, Tel: ${phone}` : p5Address;
-  // Address (ที่อยู่): keep X; Y moved up by 2 (240 → 242).
-  drawFieldText(page5, "p5.address", p5AddressFull, { x: 200, y: 242, size: 10, font, color: C });
-
-  // Mark 'X' (checkbox).
-  drawFieldText(page5, "p5.mark", "X", { x: 135, y: 283, size: 12, font, color: C });
-  // TOURISM.
-  drawFieldText(page5, "p5.extensionReason", extensionReason, { x: 200, y: 263, size: 12, font, color: C });
-  // Bottom name (ชื่อสกุลด้านล่าง): keep X; Y moved up by 2 (220.5 → 222.5).
-  drawFieldText(page5, "p5.bottomName", titledName, { x: 165, y: 222.5, size: 12, font, color: C });
-
 
   // ── Append the uploaded TM.30 as the final page(s) ─────────
   // The applicant's original TM.30 receipt is copied verbatim and
-  // appended after page 5, so the generated packet ends with the
+  // appended after page 3, so the generated packet ends with the
   // exact TM.30 PDF they uploaded during the address scan step.
   if (tm30Pdf && tm30Pdf.byteLength > 0) {
     const tm30Doc = await PDFDocument.load(tm30Pdf);

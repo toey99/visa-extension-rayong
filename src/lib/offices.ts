@@ -1,34 +1,29 @@
-// Immigration offices this app can generate TM.7 packets for.
-//
-// Both offices accept the same document layout, so one template and one set
-// of coordinates serve all of them — only the text printed in the
-// "สถานที่ยื่นคำร้อง / Form Location" boxes changes.
-//
-// To add another office that uses the same form: add one entry here. Nothing
-// else needs to change.
+// =============================================================
+// Immigration offices served by this app
+// =============================================================
+// The ONLY source of the "Form Location / สถานที่ยื่นคำร้อง" text printed
+// on the TM.7. The form sends an office id; the server maps it to the
+// printed text here. There is deliberately no free-text or default
+// location anywhere else.
+// =============================================================
 
 export const OFFICES = {
-  RAYONG: {
-    id: "RAYONG",
-    label: "Rayong",
-    labelThai: "ระยอง",
-    // Exact text printed on the form.
-    formLocation: "RAYONG",
-  },
-  CHIANG_SAEN: {
-    id: "CHIANG_SAEN",
-    label: "Chiang Saen",
-    labelThai: "เชียงแสน",
-    formLocation: "CHIANG SAEN",
-  },
+  RAYONG: { label: "Rayong", thai: "ระยอง", formLocation: "RAYONG" },
+  CHIANG_SAEN: { label: "Chiang Saen", thai: "เชียงแสน", formLocation: "CHIANG SAEN" },
 } as const;
 
 export type OfficeId = keyof typeof OFFICES;
 
-export const OFFICE_LIST = Object.values(OFFICES);
+export const OFFICE_IDS = Object.keys(OFFICES) as OfficeId[];
 
 export const DEFAULT_OFFICE: OfficeId = "RAYONG";
 
-export function isOfficeId(v: string): v is OfficeId {
-  return v in OFFICES;
+export function isOfficeId(v: unknown): v is OfficeId {
+  return typeof v === "string" && Object.hasOwn(OFFICES, v);
+}
+
+/** Text printed in the form-location box for an office. */
+export function officeFormLocation(id: OfficeId): string {
+  if (!isOfficeId(id)) throw new Error(`Unknown office: ${String(id)}`);
+  return OFFICES[id].formLocation;
 }

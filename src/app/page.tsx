@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import type { Tm7FormData, Title } from "@/lib/tm7-generator";
-import { OFFICES, OFFICE_LIST, DEFAULT_OFFICE, isOfficeId, type OfficeId } from "@/lib/offices";
+import { DEFAULT_OFFICE, OFFICES, OFFICE_IDS, type OfficeId } from "@/lib/offices";
 import AiPassportScanner, { type AiScanResult } from "@/components/AiPassportScanner";
 import AiTm30Scanner, { type AiTm30ScanResult } from "@/components/AiTm30Scanner";
 
@@ -64,6 +64,40 @@ const INITIAL: FormState = {
   extensionReason: "TOURISM",
 };
 
+// Dev-only sample data: each value names its own field so it is obvious
+// in the generated PDF which value landed in which box. Dates are distinct
+// so each one is recognisable too (page 3's "Date" = appointmentDate).
+const SAMPLE: FormState = {
+  title: "MR.",
+  firstName: "FIRSTNAME",
+  lastName: "LASTNAME",
+  nationality: "NATIONALITY",
+  dateOfBirth: "01/02/1980",
+  placeOfBirth: "BIRTHPLACE-XXX",
+  passportNo: "PASSPORTNO123",
+  passportIssueDate: "03/04/2021",
+  passportExpiryDate: "05/06/2031",
+  passportIssuedAt: "ISSUEDAT-XXX",
+  arrivalDate: "07/08/2026",
+  fromCountry: "FROMCOUNTRY-XXX",
+  portOfArrival: "PORT-XXX",
+  arrivedBy: "ARRIVEDBY-XXX",
+  visaType: "VISATYPE-XXX",
+  houseNo: "HOUSENO-1",
+  road: "ROAD-XXX",
+  subDistrict: "SUBDISTRICT-XXX",
+  district: "DISTRICT-XXX",
+  province: "PROVINCE-XXX",
+  postalCode: "99999",
+  phone: "PHONE-0812345678",
+  appointmentDate: "09/10/2026",
+  office: DEFAULT_OFFICE,
+  extensionDays: "45",
+  extensionReason: "REASON-TOURISM",
+};
+
+const IS_DEV = process.env.NODE_ENV !== "production";
+
 export default function Page() {
   const [form, setForm] = useState<FormState>(INITIAL);
   const [submitting, setSubmitting] = useState(false);
@@ -86,15 +120,15 @@ export default function Page() {
     setForm((prev) => ({
       ...prev,
       title: data.title || prev.title,
-      firstName: data.firstName || prev.firstName,
-      lastName: data.lastName || prev.lastName,
-      nationality: data.nationality || prev.nationality,
-      passportNo: data.passportNo || prev.passportNo,
+      firstName: upper(data.firstName) || prev.firstName,
+      lastName: upper(data.lastName) || prev.lastName,
+      nationality: upper(data.nationality) || prev.nationality,
+      passportNo: upper(data.passportNo) || prev.passportNo,
       dateOfBirth: data.dateOfBirth || prev.dateOfBirth,
-      placeOfBirth: data.placeOfBirth || prev.placeOfBirth,
+      placeOfBirth: upper(data.placeOfBirth) || prev.placeOfBirth,
       passportIssueDate: data.passportIssueDate || prev.passportIssueDate,
       passportExpiryDate: data.passportExpiryDate || prev.passportExpiryDate,
-      passportIssuedAt: data.passportIssuedAt || prev.passportIssuedAt,
+      passportIssuedAt: upper(data.passportIssuedAt) || prev.passportIssuedAt,
     }));
 
     setError("");
@@ -121,11 +155,11 @@ export default function Page() {
 
     setForm((prev) => ({
       ...prev,
-      houseNo: data.houseNo || prev.houseNo,
-      road: data.road || prev.road,
-      subDistrict: data.subDistrict || prev.subDistrict,
-      district: data.district || prev.district,
-      province: data.province || prev.province,
+      houseNo: upper(data.houseNo) || prev.houseNo,
+      road: upper(data.road) || prev.road,
+      subDistrict: upper(data.subDistrict) || prev.subDistrict,
+      district: upper(data.district) || prev.district,
+      province: upper(data.province) || prev.province,
       postalCode: data.postalCode || prev.postalCode,
     }));
 
@@ -173,6 +207,10 @@ export default function Page() {
 
     setSubmitting(true);
 
+    // Open the tab synchronously (still inside the click) so popup
+    // blockers allow it; it is pointed at the PDF once generated.
+    const pdfTab = window.open("", "_blank");
+
     if (pdfUrl) {
       URL.revokeObjectURL(pdfUrl);
       setPdfUrl("");
@@ -202,7 +240,7 @@ export default function Page() {
       postalCode: form.postalCode || undefined,
       phone: form.phone || undefined,
       appointmentDate: ddmmyyyyToIso(form.appointmentDate),
-      formLocation: OFFICES[form.office].formLocation,
+      office: form.office,
       extensionDays: form.extensionDays ? Number(form.extensionDays) : undefined,
       extensionReason: form.extensionReason || undefined,
     };
@@ -225,11 +263,13 @@ export default function Page() {
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       setPdfUrl(url);
+      if (pdfTab) pdfTab.location.href = url;
 
       setTimeout(() => {
         previewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 100);
     } catch (err) {
+      pdfTab?.close();
       setError(err instanceof Error ? err.message : "Failed to generate PDF");
     } finally {
       setSubmitting(false);
@@ -272,7 +312,7 @@ export default function Page() {
           TM.7 Visa Extension Form
         </h1>
         <p className="mt-2 text-sm text-slate-600">
-          Fill in your details below and generate a printable TM.7 packet (5 pages: TM.7, STM.2, STM.9, STM.11).
+          Fill in your details below and generate a printable TM.7 packet (3 pages: TM.7, STM.2).
         </p>
       </header>
 
@@ -321,9 +361,10 @@ export default function Page() {
               type="text"
               required
               value={form.firstName}
-              onChange={(e) => set("firstName", e.target.value)}
+              onChange={(e) => set("firstName", e.target.value.toUpperCase())}
               placeholder="JOHN"
-              className={inputCls}
+              autoCapitalize="characters"
+              className={upperInputCls}
             />
           </Field>
           <Field label="Last Name" thai="นามสกุล" required>
@@ -331,9 +372,10 @@ export default function Page() {
               type="text"
               required
               value={form.lastName}
-              onChange={(e) => set("lastName", e.target.value)}
+              onChange={(e) => set("lastName", e.target.value.toUpperCase())}
               placeholder="DOE"
-              className={inputCls}
+              autoCapitalize="characters"
+              className={upperInputCls}
             />
           </Field>
           <Field label="Nationality" thai="สัญชาติ" required>
@@ -341,9 +383,10 @@ export default function Page() {
               type="text"
               required
               value={form.nationality}
-              onChange={(e) => set("nationality", e.target.value)}
+              onChange={(e) => set("nationality", e.target.value.toUpperCase())}
               placeholder="BRITISH"
-              className={inputCls}
+              autoCapitalize="characters"
+              className={upperInputCls}
             />
           </Field>
           <Field label="Date of Birth" thai="วันเกิด">
@@ -356,9 +399,10 @@ export default function Page() {
             <input
               type="text"
               value={form.placeOfBirth}
-              onChange={(e) => set("placeOfBirth", e.target.value)}
+              onChange={(e) => set("placeOfBirth", e.target.value.toUpperCase())}
               placeholder="LONDON"
-              className={inputCls}
+              autoCapitalize="characters"
+              className={upperInputCls}
             />
           </Field>
         </Section>
@@ -371,16 +415,18 @@ export default function Page() {
               value={form.passportNo}
               onChange={(e) => set("passportNo", e.target.value.toUpperCase())}
               placeholder="AB1234567"
-              className={inputCls}
+              autoCapitalize="characters"
+              className={upperInputCls}
             />
           </Field>
           <Field label="Issued At (country)" thai="ออกให้ที่ (ประเทศ)">
             <input
               type="text"
               value={form.passportIssuedAt}
-              onChange={(e) => set("passportIssuedAt", e.target.value)}
+              onChange={(e) => set("passportIssuedAt", e.target.value.toUpperCase())}
               placeholder="UNITED KINGDOM"
-              className={inputCls}
+              autoCapitalize="characters"
+              className={upperInputCls}
             />
           </Field>
           <Field label="Date of Issue" thai="วันที่ออก">
@@ -409,33 +455,37 @@ export default function Page() {
             <input
               type="text"
               value={form.fromCountry}
-              onChange={(e) => set("fromCountry", e.target.value)}
+              onChange={(e) => set("fromCountry", e.target.value.toUpperCase())}
               placeholder="UNITED KINGDOM"
-              className={inputCls}
+              autoCapitalize="characters"
+              className={upperInputCls}
             />
           </Field>
           <Field label="Port of Arrival" thai="ด่านที่เดินทางเข้า">
             <input
               type="text"
               value={form.portOfArrival}
-              onChange={(e) => set("portOfArrival", e.target.value)}
-              className={inputCls}
+              onChange={(e) => set("portOfArrival", e.target.value.toUpperCase())}
+              autoCapitalize="characters"
+              className={upperInputCls}
             />
           </Field>
           <Field label="Arrived By" thai="เดินทางโดย">
             <input
               type="text"
               value={form.arrivedBy}
-              onChange={(e) => set("arrivedBy", e.target.value)}
-              className={inputCls}
+              onChange={(e) => set("arrivedBy", e.target.value.toUpperCase())}
+              autoCapitalize="characters"
+              className={upperInputCls}
             />
           </Field>
           <Field label="Type of Visa" thai="ประเภทวีซ่า" full>
             <input
               type="text"
               value={form.visaType}
-              onChange={(e) => set("visaType", e.target.value)}
-              className={inputCls}
+              onChange={(e) => set("visaType", e.target.value.toUpperCase())}
+              autoCapitalize="characters"
+              className={upperInputCls}
             />
           </Field>
         </Section>
@@ -445,40 +495,45 @@ export default function Page() {
             <input
               type="text"
               value={form.houseNo}
-              onChange={(e) => set("houseNo", e.target.value)}
-              className={inputCls}
+              onChange={(e) => set("houseNo", e.target.value.toUpperCase())}
+              autoCapitalize="characters"
+              className={upperInputCls}
             />
           </Field>
           <Field label="Road / Street" thai="ถนน">
             <input
               type="text"
               value={form.road}
-              onChange={(e) => set("road", e.target.value)}
-              className={inputCls}
+              onChange={(e) => set("road", e.target.value.toUpperCase())}
+              autoCapitalize="characters"
+              className={upperInputCls}
             />
           </Field>
           <Field label="Sub-District (Tambol)" thai="ตำบล / แขวง">
             <input
               type="text"
               value={form.subDistrict}
-              onChange={(e) => set("subDistrict", e.target.value)}
-              className={inputCls}
+              onChange={(e) => set("subDistrict", e.target.value.toUpperCase())}
+              autoCapitalize="characters"
+              className={upperInputCls}
             />
           </Field>
           <Field label="District (Amphur)" thai="อำเภอ / เขต">
             <input
               type="text"
               value={form.district}
-              onChange={(e) => set("district", e.target.value)}
-              className={inputCls}
+              onChange={(e) => set("district", e.target.value.toUpperCase())}
+              autoCapitalize="characters"
+              className={upperInputCls}
             />
           </Field>
           <Field label="Province" thai="จังหวัด">
             <input
               type="text"
               value={form.province}
-              onChange={(e) => set("province", e.target.value)}
-              className={inputCls}
+              onChange={(e) => set("province", e.target.value.toUpperCase())}
+              autoCapitalize="characters"
+              className={upperInputCls}
             />
           </Field>
           <Field label="Postal Code" thai="รหัสไปรษณีย์">
@@ -508,17 +563,16 @@ export default function Page() {
               highlight
             />
           </Field>
-          <Field label="Immigration Office" thai="สถานที่ยื่นคำร้อง">
+          <Field label="Immigration Office" thai="สถานที่ยื่นคำร้อง" required>
             <select
+              required
               value={form.office}
-              onChange={(e) => {
-                if (isOfficeId(e.target.value)) set("office", e.target.value);
-              }}
+              onChange={(e) => set("office", e.target.value as OfficeId)}
               className={inputCls}
             >
-              {OFFICE_LIST.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.label} ({o.labelThai})
+              {OFFICE_IDS.map((id) => (
+                <option key={id} value={id}>
+                  {OFFICES[id].label} ({OFFICES[id].thai})
                 </option>
               ))}
             </select>
@@ -537,8 +591,9 @@ export default function Page() {
             <input
               type="text"
               value={form.extensionReason}
-              onChange={(e) => set("extensionReason", e.target.value)}
-              className={inputCls}
+              onChange={(e) => set("extensionReason", e.target.value.toUpperCase())}
+              autoCapitalize="characters"
+              className={upperInputCls}
             />
           </Field>
         </Section>
@@ -550,6 +605,18 @@ export default function Page() {
         )}
 
         <div className="flex items-center justify-end gap-3">
+          {IS_DEV && (
+            <button
+              type="button"
+              onClick={() => {
+                setForm(SAMPLE);
+                setError("");
+              }}
+              className="mr-auto rounded-lg border border-dashed border-amber-400 bg-amber-50 px-5 py-2.5 text-sm font-medium text-amber-800 transition-colors hover:bg-amber-100"
+            >
+              Fill sample data (dev)
+            </button>
+          )}
           <button
             type="button"
             onClick={handleReset}
@@ -582,8 +649,8 @@ export default function Page() {
               <h2 className="text-xl font-semibold text-slate-900">Preview</h2>
               <p className="text-sm text-slate-500">
                 {tm30File
-                  ? "6 pages: TM.7, STM.2, STM.9, STM.11, TM.30"
-                  : "5 pages: TM.7, STM.2, STM.9, STM.11"}
+                  ? "3 pages + TM.30: TM.7, STM.2, TM.30"
+                  : "3 pages: TM.7, STM.2"}
               </p>
             </div>
             <div className="flex gap-2">
@@ -617,8 +684,15 @@ export default function Page() {
 const inputBase =
   "w-full rounded-lg border px-3.5 py-2.5 text-sm transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none";
 const inputCls = `${inputBase} border-slate-300 bg-white`;
+// Free-text fields printed on the form: shown AND stored in uppercase.
+const upperInputCls = `${inputCls} uppercase`;
 // Yellow highlight for fields that always require manual entry (no AI/passport auto-fill).
 const inputHighlightCls = `${inputBase} border-yellow-400 bg-yellow-100 font-semibold text-yellow-900 placeholder:font-normal placeholder:text-yellow-700/60`;
+
+// Uppercase optional scanner output (undefined/empty stays falsy).
+function upper(v: string | undefined | null): string {
+  return (v ?? "").toUpperCase();
+}
 
 // Auto-format raw digits as DD/MM/YYYY while typing (e.g. "01122024" → "01/12/2024")
 function formatDateMask(raw: string): string {

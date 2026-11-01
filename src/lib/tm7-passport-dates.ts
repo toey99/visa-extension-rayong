@@ -10,7 +10,7 @@
 //   y 406  Month [x 105] Year [x 205] Type of Visa [x 350]
 //
 // So each date's DAY sits at the END of the line ABOVE its own
-// month/year. Verified against the Rayong template (page 1 layout identical to Nonthaburi)'s text layer:
+// month/year. Verified against the Nonthaburi template's text layer:
 // "ลงวันที่ / Date of issue" ends the Passport No. row (dots at
 // y≈465), "มีอายุใช้ได้ถึงวันที่ / Valid until Date" ends the Issued-at
 // row (dots at y≈430). Keeping the geometry in one table next to the

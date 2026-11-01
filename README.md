@@ -22,9 +22,12 @@ Forked from `visa-extension-nonthaburi` (non.toyka.net) at commit `e2bb791`
       remove/move all draws that target old pages 3–5 (page index ≥ 3 must not be
       referenced anywhere after the change).
 - [ ] Confirm the exact office strings in `src/lib/offices.ts` (`formLocation`).
-- [ ] Vercel: new project → add domain `rayong.toyka.net`; copy all env vars from
-      the non project and set `NEXTAUTH_URL=https://rayong.toyka.net`.
-- [ ] Google Cloud Console → OAuth client → add
+- [ ] Vercel: new project → add domain `rayong.toyka.net`; copy env vars from the
+      non project (NextAuth v5 names): `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`,
+      `AUTH_SECRET`, `AUTH_ALLOWED_EMAILS` (comma-separated; empty = nobody can
+      sign in), `GEMINI_API_KEY`, and set `AUTH_URL=https://rayong.toyka.net`.
+- [ ] Google Cloud Console → same OAuth client as bkk/non → add
+      `https://rayong.toyka.net` to Authorized JavaScript origins and
       `https://rayong.toyka.net/api/auth/callback/google` to Authorized redirect URIs.
 - [ ] Cloudflare DNS (zone toyka.net): CNAME `rayong` → `cname.vercel-dns.com`,
       same proxy setting as `bkk` / `non`.
